@@ -1,177 +1,71 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "Yamaha AV receivers (YNCA)",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Yamaha AV receivers over local YNCA: power, volume, input, sound program of each zone.",
+    "fr": "Amplis AV Yamaha en YNCA local : marche, volume, entrée, programme sonore par zone."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-yamaha-ynca:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-yamaha-ynca/main/cover.png",
+  "categories": ["multimedia"],
+  "transports": ["local"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your Yamaha AV receivers, on your local network",
+        "fr": "Vos amplis AV Yamaha, sur votre réseau local"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Power state, power on, standby, volume, mute, input and sound program of each zone (main zone, zones 2, 3 and 4) of Yamaha RX-V, RX-A, HTR and similar receivers, through their YNCA network control port (TCP 50000), without any cloud. Turn on \"Network Standby\" on the receiver so it answers while in standby, give it a fixed IP address in your router and type it below: one device per zone then appears in the Discovery tab. The volume set from Gladys never goes above the cap below. For a MusicCast receiver, the MusicCast integration (another protocol) is an alternative: use one or the other for a given receiver. Never tested with a real device. Unofficial integration, not affiliated with Yamaha.",
+        "fr": "État de marche, allumage, veille, volume, sourdine, entrée et programme sonore de chaque zone (zone principale, zones 2, 3 et 4) des amplis Yamaha RX-V, RX-A, HTR et assimilés, par leur port de contrôle réseau YNCA (TCP 50000), sans aucun cloud. Activez « Veille réseau » (Network Standby) sur l'ampli pour qu'il réponde en veille, donnez-lui une adresse IP fixe dans votre box et saisissez-la ci-dessous : un appareil par zone apparaît alors dans l'onglet Découverte. Le volume réglé depuis Gladys ne dépasse jamais le plafond ci-dessous. Pour un ampli MusicCast, l'intégration MusicCast (un autre protocole) est une alternative : utilisez l'une ou l'autre pour un même ampli. Jamais testé avec un vrai appareil. Intégration non officielle, sans lien avec Yamaha."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-yamaha-ynca/blob/main/docs/fr.md",
+          "label": { "en": "Guide (French)", "fr": "Guide (français)" }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-yamaha-ynca/blob/main/docs/en.md",
+          "label": { "en": "Guide (English)", "fr": "Guide (anglais)" }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
+      "key": "addresses",
+      "type": "string",
+      "label": { "en": "IP addresses of the receivers", "fr": "Adresses IP des amplis" },
       "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+        "en": "Separated by commas, for example 192.168.1.50, 192.168.1.51 (port 50000 by default, or 192.168.1.50:50001). Ten receivers at most. The devices are tied to this address: keep it fixed.",
+        "fr": "Séparées par des virgules, par exemple 192.168.1.50, 192.168.1.51 (port 50000 par défaut, ou 192.168.1.50:50001). Dix amplis au plus. Les appareils sont liés à cette adresse : gardez-la fixe."
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
-    },
-    {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
-    },
-    {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
+      "placeholder": { "en": "192.168.1.50", "fr": "192.168.1.50" },
       "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
+      "default": ""
     },
     {
-      "key": "poll_frequency",
+      "key": "max_volume_db",
       "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "label": { "en": "Volume cap (dB)", "fr": "Plafond de volume (dB)" },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "The highest volume Gladys may set, from -80 to +16.5 dB as shown on the receiver (+16.5: no cap). A higher volume asked by a scene, a voice assistant or the dashboard is set to this cap; unmuting and Power on bring a higher volume down to it. The volume set on the receiver itself (knob, remote, app) is not changed. On the Gladys slider, 0 is -80.5 dB and 100 is +16.5 dB.",
+        "fr": "Le volume le plus fort que Gladys peut régler, de -80 à +16,5 dB comme affiché sur l'ampli (+16,5 : pas de plafond). Un volume plus fort demandé par une scène, un assistant vocal ou le tableau de bord est ramené à ce plafond ; la reprise du son et l'allumage ramènent aussi un volume plus fort à ce plafond. Le volume réglé sur l'ampli lui-même (bouton, télécommande, application) n'est pas modifié. Sur le curseur de Gladys, 0 vaut -80,5 dB et 100 vaut +16,5 dB."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": -20,
+      "min": -80,
+      "max": 16.5
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
+      "key": "check_receivers",
+      "label": { "en": "Check the receivers", "fr": "Vérifier les amplis" },
       "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
-      },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }

@@ -1,67 +1,137 @@
-# Template de démonstration
+# Amplis AV Yamaha (YNCA)
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Pilotez les zones de votre ampli AV Yamaha depuis Gladys, sur votre réseau
+local, sans aucun cloud : état de marche, allumage, veille, volume (plafonné),
+sourdine, entrée et programme sonore.
 
-## Ce que vous obtenez
+> **Jamais testé avec un vrai appareil.** Cette intégration n'a jamais été
+> testée avec un vrai appareil : elle a été écrite à partir de la bibliothèque
+> ynca et testée face à un ampli simulé seulement. Les retours des
+> propriétaires sont les bienvenus. Intégration non officielle, sans lien avec
+> Yamaha.
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+## Quels amplis
+
+Les amplis Yamaha qui parlent **YNCA**, le protocole de contrôle réseau sur le
+port TCP 50000 : la plupart des RX-V, RX-A (AVENTAGE), HTR et CX-A avec prise
+réseau depuis 2010 environ, y compris les modèles MusicCast récents (YNCA et
+MusicCast sont deux protocoles qu'un même ampli peut parler). Les zones de
+l'ampli (zone principale, zones 2, 3, 4) sont trouvées d'elles-mêmes.
+
+### YNCA ou MusicCast ?
+
+[guim31/gladys-musiccast](https://github.com/guim31/gladys-musiccast) pilote les
+appareils Yamaha par **MusicCast**, un autre protocole (HTTP). Cette
+intégration parle **YNCA** :
+
+- votre ampli est ancien et n'a pas MusicCast : utilisez cette intégration ;
+- votre ampli est MusicCast (enceintes, barres de son, amplis récents) : les
+  deux peuvent marcher. MusicCast couvre aussi des appareils qui ne sont pas
+  des amplis ; YNCA donne les programmes sonores, les entrées et les zones
+  tels que l'ampli les nomme.
+- Utilisez **l'une ou l'autre** pour un même ampli, pas les deux : vous auriez
+  deux appareils Gladys pour la même zone, et deux plafonds de volume.
+
+## Avant de commencer
+
+1. Sur l'ampli, activez la **veille réseau** (Network Standby ; Configuration
+   > Réseau > Veille réseau, le nom varie selon le modèle). Sans elle, un ampli
+   > en veille quitte le réseau : il ne peut pas être allumé depuis Gladys et
+   > apparaît éteint.
+2. Donnez à l'ampli une **adresse IP fixe** dans votre box (réservation DHCP).
+   Les appareils Gladys sont liés à cette adresse : une nouvelle adresse donne
+   de nouveaux appareils.
+3. Un ampli accepte peu de connexions YNCA à la fois. Si un autre programme en
+   garde une ouverte (Home Assistant `yamaha_ynca`, un script), l'intégration
+   peut ne pas obtenir de réponse : le statut de l'intégration le dit alors.
 
 ## Configuration
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+- **Adresses IP des amplis** : séparées par des virgules, par exemple
+  `192.168.1.50, 192.168.1.51`. Port 50000 par défaut ; un autre port s'écrit
+  `192.168.1.50:50001`. Dix amplis au plus.
+- **Plafond de volume (dB)** : le volume le plus fort que Gladys peut régler,
+  de -80 à +16,5 dB, comme affiché sur l'écran de l'ampli. -20 dB par défaut.
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+Enregistrez : un appareil par zone apparaît dans l'onglet **Découverte** (par
+exemple « RX-V673 Main zone », « RX-V673 Zone 2 », ou le nom de zone réglé sur
+l'ampli). Créez ceux que vous voulez.
 
-## Actions
+## Ce que fait chaque appareil
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+| Fonction        | Ce qu'elle fait                                                                                                                                          |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Power (marche)  | Lecture seule : 1 allumé, 0 en veille (ou ampli injoignable).                                                                                            |
+| Power on        | Bouton : allume la zone.                                                                                                                                 |
+| Standby         | Bouton : met la zone en veille.                                                                                                                          |
+| Volume          | 0 à 100, plafonné (voir plus bas).                                                                                                                       |
+| Mute (sourdine) | Bouton : chaque appui coupe ou rend le son (la sourdine en cours est lue d'abord).                                                                       |
+| Input (entrée)  | Liste : les entrées de l'ampli (avec les noms réglés dessus), et « Main Zone Sync » pour les zones 2 à 4.                                                |
+| Sound program   | Liste, zone principale seulement : Hall in Munich, Standard, 7ch Stereo... Un programme absent de votre modèle est refusé par l'ampli, et Gladys le dit. |
 
-## Scènes
+La marche est un état en lecture seule et deux boutons, jamais un
+interrupteur : un « éteins tout » d'un assistant vocal ou d'une scène n'allume
+ni n'éteint jamais votre ampli par surprise.
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+Les changements faits sur l'ampli, sa télécommande ou son application
+remontent aussitôt dans Gladys (au plus une fois par seconde et par zone).
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+## Le volume et son plafond
 
-## Tableau de bord
+YNCA travaille en dB, de -80,5 dB à +16,5 dB par pas de 0,5 dB. Gladys affiche
+0 à 100, linéairement : **0 = -80,5 dB, 50 = -32 dB, 100 = +16,5 dB**.
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+- Un volume demandé depuis Gladys (tableau de bord, scène, assistant vocal)
+  au-dessus du plafond est ramené au plafond, pas refusé : « volume 80 » donne
+  le plafond.
+- La limite de volume de l'ampli lui-même (son réglage « Max Volume ») plafonne
+  aussi, quand elle est plus basse.
+- **Rendre le son** depuis Gladys ramène d'abord au plafond un volume plus fort.
+- **Allumer** depuis Gladys : si la zone se réveille au-dessus du plafond (son
+  réglage de volume initial), le volume est ramené au plafond ; si l'ampli est
+  lent à se réveiller, c'est revérifié toutes les 2,5 s, six fois.
+- Un volume réglé sur l'ampli lui-même (bouton, télécommande, application)
+  au-dessus du plafond est affiché tel quel, et n'est pas baissé pendant qu'il
+  joue.
 
-## Dépannage
+## Commandes et réponses
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+Chaque commande reçoit une réponse dans Gladys en moins de 4 secondes :
+
+- faite : l'ampli l'a confirmée ;
+- « Refused by the receiver (@RESTRICTED) » : l'ampli ne l'accepte pas
+  maintenant (zone en veille, programme absent de ce modèle) ;
+- « Sent, without confirmation » (envoyée, sans confirmation) : elle est
+  partie mais l'ampli ne l'a pas confirmée ; l'état affiché suit ce que l'ampli
+  fait vraiment ;
+- « ... nothing sent » (rien d'envoyé) : l'ampli n'est pas connecté, ou la
+  commande a trop attendu derrière d'autres ; elle n'est jamais envoyée en
+  retard.
+
+La veille et la sourdine passent avant les commandes qui attendent pour le
+même ampli.
+
+## Quand l'ampli ne répond pas
+
+La connexion est rouverte après 10 s, puis à des intervalles doublés jusqu'à
+5 minutes. Ses zones affichent la marche à 0, et le statut de l'intégration le
+nomme. Le bouton **Vérifier les amplis** donne l'état de chaque ampli :
+connecté ou non, modèle, et marche, volume et entrée de chaque zone.
+
+## Limites
+
+- Un appareil par zone, lié à l'adresse de l'ampli (YNCA ne donne pas de numéro
+  de série).
+- Pas de commande de lecture (lecture, pause, suivant) des sources réseau, pas
+  de présélections du tuner, pas de scènes, pas de Zone B, pas de Pure Direct
+  dans cette version.
+- Adresses saisies seulement : pas de recherche automatique.
+- Jamais testé avec un vrai appareil.
+
+## Crédits
+
+Le protocole YNCA est porté de la bibliothèque
+[ynca](https://github.com/mvdwetering/ynca) de Michel van de Wetering (MIT),
+celle de l'intégration Home Assistant `yamaha_ynca`. Intégration non
+officielle, sans lien avec Yamaha. Yamaha, AVENTAGE et MusicCast sont des
+marques de Yamaha Corporation.
