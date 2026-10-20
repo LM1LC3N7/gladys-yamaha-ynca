@@ -34,10 +34,10 @@ intégration parle **YNCA** :
 
 ## Avant de commencer
 
-1. Sur l'ampli, activez la **veille réseau** (Network Standby ; Configuration
-   > Réseau > Veille réseau, le nom varie selon le modèle). Sans elle, un ampli
-   > en veille quitte le réseau : il ne peut pas être allumé depuis Gladys et
-   > apparaît éteint.
+1. Sur l'ampli, activez la **veille réseau** (Network Standby, dans le menu
+   Configuration, puis Réseau ; le nom varie selon le modèle). Sans elle, un
+   ampli en veille quitte le réseau : il ne peut pas être allumé depuis Gladys
+   et apparaît éteint.
 2. Donnez à l'ampli une **adresse IP fixe** dans votre box (réservation DHCP).
    Les appareils Gladys sont liés à cette adresse : une nouvelle adresse donne
    de nouveaux appareils.
@@ -89,7 +89,8 @@ YNCA travaille en dB, de -80,5 dB à +16,5 dB par pas de 0,5 dB. Gladys affiche
 - **Rendre le son** depuis Gladys ramène d'abord au plafond un volume plus fort.
 - **Allumer** depuis Gladys : si la zone se réveille au-dessus du plafond (son
   réglage de volume initial), le volume est ramené au plafond ; si l'ampli est
-  lent à se réveiller, c'est revérifié toutes les 2,5 s, six fois.
+  lent à se réveiller (même s'il confirme l'allumage en retard), c'est
+  revérifié toutes les 2,5 s, six fois.
 - Un volume réglé sur l'ampli lui-même (bouton, télécommande, application)
   au-dessus du plafond est affiché tel quel, et n'est pas baissé pendant qu'il
   joue.
@@ -108,8 +109,9 @@ Chaque commande reçoit une réponse dans Gladys en moins de 4 secondes :
   commande a trop attendu derrière d'autres ; elle n'est jamais envoyée en
   retard.
 
-La veille et la sourdine passent avant les commandes qui attendent pour le
-même ampli.
+La sourdine passe avant les commandes qui attendent pour le même ampli. La
+veille n'attend jamais : elle part aussitôt, et une commande encore en cours
+pour cette zone n'envoie plus rien.
 
 ## Quand l'ampli ne répond pas
 

@@ -27,6 +27,8 @@ import {
 } from './protocol.js';
 
 const ZONE_SET = new Set(ZONES);
+/** A line written and never answered is forgotten after this. */
+const TOMBSTONE_MS = 5_000;
 const INPUT_SUBUNITS = new Set(Object.keys(SUBUNIT_INPUTS));
 
 export const emptyState = () => ({
@@ -92,7 +94,16 @@ export function applyLine(state, { subunit, fn, value }) {
   if (!ZONE_SET.has(subunit)) {
     return undefined;
   }
-  const zone = state.zones[subunit] ?? (state.zones[subunit] = {});
+  // A zone exists only once it answered AVAIL (as ynca): any other line of a
+  // zone not seen yet is ignored, never creates it.
+  if (!state.zones[subunit]) {
+    if (fn !== 'AVAIL') {
+      return undefined;
+    }
+    state.zones[subunit] = {};
+    return subunit;
+  }
+  const zone = state.zones[subunit];
   const before = JSON.stringify(zone);
   switch (fn) {
     case 'AVAIL':
@@ -152,8 +163,15 @@ export class ReceiverLink {
     this.retryTimer = undefined;
     this.keepAliveTimer = undefined;
     this.lines = [];
-    /** Waiting for an answer: { subunit, fn, resolve, timer }. */
-    this.waiters = [];
+    /**
+     * Every line written on the current session and not answered yet, in
+     * order: { subunit, fn, at, waiter }. The receiver answers in order, so a
+     * refusal (`@RESTRICTED`, `@UNDEFINED`) belongs to the oldest one. A
+     * waiter that timed out stays as a tombstone (`waiter.done`) until its
+     * late answer comes (or `TOMBSTONE_MS` / `LIMITS.sentLines`), so a late
+     * answer is never given to the next line.
+     */
+    this.sent = [];
     /** The end marker of the snapshot. */
     this.snapshotDone = undefined;
     /** The last error of a connection attempt (shown by "Check"). */
@@ -185,6 +203,43 @@ export class ReceiverLink {
     this.session = undefined;
     session?.close();
     this.settleWaiters({ closed: true });
+  }
+
+  /** Writes one line on `session` and tracks it (see `this.sent`). Rejects when not written. */
+  async track(session, line, waiter) {
+    const parsed = parseLine(line);
+    await session.send(line);
+    if (session !== this.session) {
+      return;
+    }
+    this.sent.push({ subunit: parsed.subunit, fn: parsed.fn, at: this.now(), waiter });
+    this.prune();
+  }
+
+  /** Drops the entries too old or too many (the receiver will not answer them any more). */
+  prune() {
+    const now = this.now();
+    while (
+      this.sent.length > 0 &&
+      (this.sent.length > LIMITS.sentLines || now - this.sent[0].at > TOMBSTONE_MS) &&
+      !this.isLive(this.sent[0])
+    ) {
+      this.sent.shift();
+    }
+  }
+
+  isLive(entry) {
+    return Boolean(entry.waiter && !entry.waiter.done);
+  }
+
+  /** Resolves a live waiter once. */
+  settle(waiter, result) {
+    if (!waiter || waiter.done) {
+      return;
+    }
+    waiter.done = true;
+    clearTimeout(waiter.timer);
+    waiter.resolve(result);
   }
 
   /** A reconnection asked now (configuration saved): skips the backoff, never the base interval. */
@@ -243,6 +298,7 @@ export class ReceiverLink {
         return;
       }
       this.session = session;
+      this.sent = [];
       await this.readSnapshot(session);
       this.connectedAt = this.now();
       this.lastError = undefined;
@@ -284,7 +340,7 @@ export class ReceiverLink {
       );
     });
     // Closed while reading: the session send rejects.
-    const sent = Promise.all(lines.map((line) => session.send(line))).then(
+    const sent = Promise.all(lines.map((line) => this.track(session, line))).then(
       () => new Promise(() => {}),
     );
     const closed = new Promise((resolve) => {
@@ -317,26 +373,19 @@ export class ReceiverLink {
     if (!parsed) {
       return;
     }
+    this.prune();
     if (parsed.status !== 'ok') {
-      // A refused line: the oldest one waiting for an answer (the receiver answers in order).
-      const waiter = this.waiters.shift();
-      if (waiter) {
-        clearTimeout(waiter.timer);
-        waiter.resolve({ refused: parsed.status });
-      }
+      // A refused line: the oldest one written (the receiver answers in order).
+      // A tombstone takes it: a late refusal never reaches the next line.
+      const entry = this.sent.shift();
+      this.settle(entry?.waiter, { refused: parsed.status });
       return;
     }
     const changed = applyLine(this.state, parsed);
     if (parsed.subunit === 'SYS' && parsed.fn === 'VERSION' && this.snapshotDone) {
       this.snapshotDone(true);
     }
-    for (const waiter of this.waiters.filter(
-      (w) => w.subunit === parsed.subunit && w.fn === parsed.fn,
-    )) {
-      this.waiters.splice(this.waiters.indexOf(waiter), 1);
-      clearTimeout(waiter.timer);
-      waiter.resolve({ value: parsed.value });
-    }
+    this.answer(parsed);
     if (changed && this.connectedAt !== undefined) {
       this.onEvent('update', this, changed);
     }
@@ -377,10 +426,38 @@ export class ReceiverLink {
     this.onEvent('down', this);
   }
 
+  /**
+   * An `ok` line answers the oldest line still waited for of the same
+   * subunit and function whose waiter accepts its value (a write waits for
+   * the value it set: a line pushed meanwhile with another value is not its
+   * answer); the lines written before it and no longer waited for are
+   * dropped (answered, or never to be: the receiver answers in order).
+   * Without such a waiter, it is the late answer of the oldest line no longer
+   * waited for of that function, if any. An `ok` line only carries a state,
+   * the same for everyone: what must never go to the wrong line is a refusal.
+   */
+  answer({ subunit, fn, value }) {
+    const same = (e) => e.subunit === subunit && e.fn === fn;
+    let index = this.sent.findIndex((e) => same(e) && this.isLive(e) && e.waiter.accept(value));
+    if (index === -1) {
+      index = this.sent.findIndex((e) => same(e) && !this.isLive(e));
+    }
+    if (index === -1) {
+      for (const entry of this.sent) {
+        if (this.isLive(entry) && entry.subunit === subunit && entry.fn === fn) {
+          entry.waiter.lastValue = value;
+        }
+      }
+      return;
+    }
+    const matched = this.sent[index];
+    this.sent = this.sent.filter((e, i) => i > index || (i < index && this.isLive(e)));
+    this.settle(matched.waiter, { value });
+  }
+
   settleWaiters(result) {
-    for (const waiter of this.waiters.splice(0)) {
-      clearTimeout(waiter.timer);
-      waiter.resolve(result);
+    for (const entry of this.sent.splice(0)) {
+      this.settle(entry.waiter, result);
     }
   }
 
@@ -396,7 +473,7 @@ export class ReceiverLink {
         session.close();
         return;
       }
-      session.send(getLine('SYS', 'MODELNAME')).catch(() => {});
+      this.track(session, getLine('SYS', 'MODELNAME')).catch(() => {});
     }, this.timings.keepAlive);
   }
 
@@ -406,52 +483,45 @@ export class ReceiverLink {
   }
 
   /**
-   * Sends one line and waits for its answer: the next line of the same
-   * subunit and function (`{ value }`), a refusal (`{ refused }`), the end of
-   * `timeoutMs` (`{ timeout: true }`) or the end of the connection (`{ closed:
-   * true }`). Throws a DeviceError UNREACHABLE when the line could not be
-   * written (nothing sent).
+   * Sends one line and waits for its answer: a line of the same subunit and
+   * function whose value `accept` takes (`{ value }`), a refusal (`{
+   * refused }`), the end of `timeoutMs` counted from the write (`{ timeout:
+   * true, lastValue }`, `lastValue` being a value seen and not accepted) or
+   * the end of the connection (`{ closed: true }`). Throws a DeviceError
+   * UNREACHABLE when the line could not be written (nothing sent).
    */
-  async exchange(subunit, fn, value, timeoutMs) {
+  async exchange(subunit, fn, value, timeoutMs, accept = () => true) {
     if (!this.connected) {
       throw new DeviceError(ERROR_KINDS.UNREACHABLE, 'Not connected: nothing sent');
     }
     const line = formatLine(subunit, fn, value);
+    const session = this.session;
     let waiter;
     const answer = new Promise((resolve) => {
-      waiter = { subunit, fn, resolve };
+      waiter = { resolve, accept, done: false, lastValue: undefined };
+    });
+    // The waiter is tracked once the line is written: its answer can only come after.
+    await this.track(session, line, waiter);
+    if (session !== this.session) {
+      this.settle(waiter, { closed: true });
+      return answer;
+    }
+    if (!waiter.done) {
       waiter.timer = setTimeout(
-        () => {
-          const index = this.waiters.indexOf(waiter);
-          if (index !== -1) {
-            this.waiters.splice(index, 1);
-          }
-          resolve({ timeout: true });
-        },
+        () => this.settle(waiter, { timeout: true, lastValue: waiter.lastValue }),
         Math.max(0, timeoutMs),
       );
-    });
-    this.waiters.push(waiter);
-    try {
-      await this.session.send(line);
-    } catch (err) {
-      const index = this.waiters.indexOf(waiter);
-      if (index !== -1) {
-        this.waiters.splice(index, 1);
-      }
-      clearTimeout(waiter.timer);
-      throw err;
     }
     return answer;
   }
 
-  /** Reads one function (`?`). */
+  /** Reads one function (`?`): any value answers. */
   read(subunit, fn, timeoutMs) {
     return this.exchange(subunit, fn, '?', timeoutMs);
   }
 
-  /** Writes one function. */
-  write(subunit, fn, value, timeoutMs) {
-    return this.exchange(subunit, fn, value, timeoutMs);
+  /** Writes one function: only a value `accept` takes confirms it. */
+  write(subunit, fn, value, timeoutMs, accept = (v) => v === value) {
+    return this.exchange(subunit, fn, value, timeoutMs, accept);
   }
 }

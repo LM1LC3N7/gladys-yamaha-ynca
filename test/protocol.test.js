@@ -101,6 +101,11 @@ test('power, mute and input names', () => {
 
 test('applyLine keeps only known zones, functions and values', () => {
   const state = emptyState();
+  // A zone exists only once it answered AVAIL: any other line never creates it.
+  assert.equal(applyLine(state, parseLine('@ZONE4:SCENE1NAME=x')), undefined);
+  assert.equal(applyLine(state, parseLine('@ZONE4:PWR=On')), undefined);
+  assert.ok(!('ZONE4' in state.zones));
+  assert.equal(applyLine(state, parseLine('@MAIN:AVAIL=Ready')), 'MAIN');
   assert.equal(applyLine(state, parseLine('@MAIN:PWR=On')), 'MAIN');
   assert.equal(applyLine(state, parseLine('@MAIN:PWR=On')), undefined, 'unchanged');
   assert.equal(applyLine(state, parseLine('@ZONE9:PWR=On')), undefined);

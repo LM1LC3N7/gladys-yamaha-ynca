@@ -27,11 +27,27 @@ the notes of the version's GitHub Release.
 - Every command is answered within 4 seconds: confirmed, refused by the
   receiver, "sent, without confirmation" (after a read-back), or "nothing
   sent"; a command still waiting at its deadline is dropped, never sent late.
-  Standby and mute go before the commands waiting.
+  Mute goes before the commands waiting; Standby never waits behind them.
 - A receiver off the network shows its zones at power 0 and is named in the
   status; the connection is opened again after 10 s, then at intervals
   doubled up to 5 minutes. A port held by another YNCA client is said.
 - "Check the receivers" button.
+
+### Fixed
+
+- Power on confirmed late (a receiver slow to wake up) still brings a volume
+  above the cap back to it.
+- A late refusal of the receiver is no longer given to the next command,
+  which was reported "refused" although done.
+- Standby no longer waits behind a slow command (it was dropped, "nothing
+  sent"); the command running for that zone stops writing.
+- A line pushed by the receiver before the answer of a write (another input
+  chosen on the remote) is no longer taken for that answer.
+- Two addresses giving the same device ids (`amp.lan` and `amp-lan`) are
+  refused instead of sharing devices.
+- A zone appears only once the receiver reports it available, not on any
+  line naming it.
+- "Main Zone Sync" no longer shows in the inputs of the main zone.
 
 ### Security
 

@@ -388,3 +388,93 @@ test('parseVolumeCommand is strict', () => {
     assert.equal(parseVolumeCommand(value), undefined, String(value));
   }
 });
+
+test('Power on confirmed late: the cap is still checked after the wake-up', async (t) => {
+  const { fake, gladys, id } = await setup(t, {
+    timings: { answerTimeout: 200, commandBudget: 600, wakeCheckDelay: 200 },
+  });
+  const zone2 = await createDevice(gladys, id, 'ZONE2');
+  // A receiver slow to wake up: the PWR lines answered after 900 ms; it wakes at -5 dB.
+  fake.cfg.hook = (line, reply) => {
+    if (!line.startsWith('@ZONE2:PWR=')) {
+      return false;
+    }
+    if (line === '@ZONE2:PWR=On') {
+      fake.state.zones.ZONE2.PWR = 'On';
+      fake.state.zones.ZONE2.VOL = '-5.0';
+    }
+    reply(
+      [`@ZONE2:PWR=${fake.state.zones.ZONE2.PWR}`, `@ZONE2:VOL=${fake.state.zones.ZONE2.VOL}`],
+      900,
+    );
+    return true;
+  };
+  const ack = await set(gladys, zone2, 'power_on');
+  assert.equal(ack.success, false);
+  assert.match(ack.error, /Sent, without confirmation/);
+  await waitFor(() => fake.state.zones.ZONE2.VOL === '-20.0', 'the volume brought back to the cap');
+  assert.equal(fake.writes().at(-1), '@ZONE2:VOL=-20.0');
+});
+
+test('a late refusal is never given to the next command', async (t) => {
+  const { fake, gladys, id } = await setup(t, { timings: { answerTimeout: 200 } });
+  const main = await createDevice(gladys, id);
+  // A slow model without sound programs: every SOUNDPRG line refused after 300 ms.
+  fake.cfg.hook = (line, reply) => {
+    if (!line.startsWith('@MAIN:SOUNDPRG=')) {
+      return false;
+    }
+    reply(['@RESTRICTED'], 300);
+    return true;
+  };
+  const first = await set(gladys, main, 'sound_program', 'Hall in Munich');
+  assert.equal(first.success, false);
+  await settle(150);
+  // The refusal of the read-back arrives now, while the volume waits for its answer.
+  fake.cfg.answerDelay = 200;
+  assert.deepEqual(await set(gladys, main, 'volume', 30), { success: true });
+  assert.equal(fake.state.zones.MAIN.VOL, '-51.5');
+});
+
+test('Standby never waits behind a slow command, which then sends nothing more', async (t) => {
+  const { fake, gladys, id } = await setup(t);
+  const main = await createDevice(gladys, id);
+  fake.state.zones.MAIN.MUTE = 'On';
+  fake.state.zones.MAIN.VOL = '-10.0';
+  // A slow receiver: every answer 300 ms late; unmuting needs four of them.
+  fake.cfg.answerDelay = 300;
+  const unmute = set(gladys, main, 'mute');
+  await settle(50);
+  const standby = set(gladys, main, 'standby');
+  assert.deepEqual(await standby, { success: true });
+  const result = await unmute;
+  assert.equal(result.success, false);
+  assert.match(result.error, /Standby pressed/);
+  await settle(400);
+  assert.deepEqual(fake.writes(), ['@MAIN:PWR=Standby']);
+  assert.equal(fake.state.zones.MAIN.PWR, 'Standby');
+});
+
+test('a line pushed before the echo is not taken for the answer of a write', async (t) => {
+  const { fake, gladys, id } = await setup(t);
+  const main = await createDevice(gladys, id);
+  fake.cfg.hook = (line, reply) => {
+    if (line !== '@MAIN:INP=HDMI2') {
+      return false;
+    }
+    reply(['@MAIN:INP=HDMI1']);
+    fake.state.zones.MAIN.INP = 'HDMI2';
+    reply(['@MAIN:INP=HDMI2'], 100);
+    return true;
+  };
+  assert.deepEqual(await set(gladys, main, 'source', 'HDMI2'), { success: true });
+});
+
+test('"Main Zone Sync" of a zone never enters the input list of the main zone', async (t) => {
+  const { fake, gladys, app, id } = await setup(t);
+  await discovered(gladys, id, 'ZONE2');
+  fake.push('@ZONE2:INP=Main Zone Sync');
+  await settle(50);
+  const receiver = app.data.receivers[`127.0.0.1:${fake.port}`];
+  assert.ok(!receiver.inputOptions.some((o) => o.value === 'Main Zone Sync'));
+});

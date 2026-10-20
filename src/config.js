@@ -80,7 +80,12 @@ export function normalizeConfig(raw = {}) {
     if (!address) {
       invalid.push(entry.slice(0, 100));
     } else if (!addresses.some((a) => addressKey(a) === addressKey(address))) {
-      if (addresses.length < LIMITS.receivers) {
+      // Two addresses with the same slug (`amp.lan`, `amp-lan`) would share
+      // their external ids: the second one is refused.
+      if (
+        addresses.length < LIMITS.receivers &&
+        !addresses.some((a) => addressSlug(a) === addressSlug(address))
+      ) {
         addresses.push(address);
       } else {
         invalid.push(entry.slice(0, 100));

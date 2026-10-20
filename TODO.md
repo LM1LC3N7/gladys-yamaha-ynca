@@ -76,7 +76,14 @@ up to date at the end of every milestone.
   device published again never loses a feature); only the input options grow
   (merged with the `supported_options` of the created devices).
 - Zones: the ones that answer `@<ZONE>:AVAIL=?`, kept in /data and never
-  dropped, so a receiver off at start still has its devices.
+  dropped, so a receiver off at start still has its devices. (Review 1,
+  2026-10-21) Any other line of a zone not seen with AVAIL is ignored, never
+  creates it.
+- (Review 1) Two typed addresses with the same slug (`amp.lan` / `amp-lan`,
+  `192.168.1.50` / `192-168-1-50`) would share external ids: the second is
+  refused (listed as invalid in the status).
+- (Review 1) "Main Zone Sync" is never kept in the input list shared by the
+  zones: `inputOptions()` adds it for zones 2 to 4 only.
 - **Power: read-only state + two `button/push`, not a `switch`.** Lesson of
   lot 6: an "everything on / off" must not wake a receiver up nor cut it.
   `PWR=On` / `PWR=Standby` per zone.
@@ -93,7 +100,9 @@ up to date at the end of every milestone.
   - Power on: after `PWR=On`, `VOL` is read and lowered to the cap when above
     it; when the zone cannot tell yet, checked again every 2.5 s, 6 times at
     most, through the receiver queue (the ack never depends on it); one chain
-    per zone, a new Power on restarts it.
+    per zone, a new Power on restarts it. (Review 1) Also when `PWR=On` was
+    sent but confirmed late or not at all (a receiver slow to wake up): only a
+    refusal, or nothing sent, starts no check.
 - Mute is a push: the mute is read just before and the explicit `On` / `Off`
   set, never a toggle. `Att -20 dB` / `Att -40 dB` count as muted.
 - Volume validated strictly before queueing: an integer 0..100 as a number or
@@ -106,11 +115,23 @@ up to date at the end of every milestone.
 - Commands: serialized per receiver (one connection), budget 3.5 s from the
   Gladys request (the wait in the queue included), each answer awaited 1.2 s
   at most; a command still queued at its deadline is dropped, never sent
-  late. A write is confirmed by the answer of the same function; without
-  one, read back; still unknown: "sent, without confirmation". A refusal
-  line (`@RESTRICTED`, `@UNDEFINED`) is given to the oldest line waiting (the
-  receiver answers in order). Standby and mute go before the commands
-  waiting, never before the one running.
+  late. A write is confirmed only by a line of the same function carrying
+  the value it set (review 1: a line pushed meanwhile with another value is
+  not its answer); without one, read back; still unknown: "sent, without
+  confirmation"; read back with another value: "sent; the receiver reports
+  …". Mute goes before the commands waiting, never before the one running.
+- (Review 1) Answers matched in order: every line written on a session
+  (keep-alive and snapshot included) is kept in a FIFO until answered. A
+  refusal line (`@RESTRICTED`, `@UNDEFINED`) belongs to the oldest one; a
+  line whose waiter timed out stays as a tombstone (5 s or 64 lines at most)
+  and takes its late refusal, so a late refusal is never given to the next
+  command. An `ok` line goes to the oldest live waiter of its function that
+  accepts its value (the older lines no longer waited for are dropped), else
+  to the oldest tombstone of its function.
+- (Review 1) **Standby never waits in the queue**: sent at once on the
+  connection (at most one line spacing behind the line in flight), with its
+  own 3.5 s budget; it cancels the wake-up check of the zone, and the command
+  running for that zone writes nothing more ("Standby pressed: … not sent").
 - Connection: one TCP connection per typed address, kept across
   reconnections to Gladys (`connected` only clears the status cache and
   `forgetPublishedStates`, then republishes the status, the devices and the

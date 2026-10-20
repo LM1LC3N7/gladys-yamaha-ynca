@@ -29,6 +29,13 @@ test('the configuration: deduplicated addresses, ten at most, invalid ones liste
   const config = normalizeConfig({ addresses: `10.0.0.1, 10.0.0.1:50000; bad!, ${many}` });
   assert.equal(config.addresses.length, 10);
   assert.deepEqual(config.invalid, ['bad!', '10.0.0.11', '10.0.0.12']);
+  // Two addresses sharing an external-id slug: the second one is refused.
+  const slugs = normalizeConfig({ addresses: 'amp.lan, amp-lan, 192.168.1.50, 192-168-1-50' });
+  assert.deepEqual(
+    slugs.addresses.map((a) => a.host),
+    ['amp.lan', '192.168.1.50'],
+  );
+  assert.deepEqual(slugs.invalid, ['amp-lan', '192-168-1-50']);
   assert.equal(normalizeConfig().maxVolumeDb, -20);
   assert.equal(normalizeConfig(null).addresses.length, 0);
 });

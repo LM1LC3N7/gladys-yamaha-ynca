@@ -85,7 +85,8 @@ YNCA works in dB, from -80.5 dB to +16.5 dB in steps of 0.5 dB. Gladys shows
 - **Unmuting** from Gladys lowers a volume above the cap to the cap first.
 - **Power on** from Gladys: if the zone wakes up above the cap (its initial
   volume setting), the volume is brought back to the cap; when the receiver
-  is slow to wake up, this is checked again every 2.5 s, six times.
+  is slow to wake up (even when it confirms Power on late), this is checked
+  again every 2.5 s, six times.
 - A volume set on the receiver itself (knob, remote, app) above the cap is
   shown as it is, and not lowered while it plays.
 
@@ -101,7 +102,9 @@ Every command is answered to Gladys within 4 seconds:
 - "... nothing sent": the receiver is not connected, or the command waited
   too long behind others; it is never sent late.
 
-Standby and mute go before the commands waiting for the same receiver.
+Mute goes before the commands waiting for the same receiver. Standby never
+waits: it is sent at once, and a command still running for that zone sends
+nothing more.
 
 ## When the receiver does not answer
 

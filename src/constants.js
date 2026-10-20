@@ -102,6 +102,8 @@ export const LIMITS = Object.freeze({
   bufferBytes: 4_096,
   /** Lines waiting to be sent on one connection. */
   sendQueue: 64,
+  /** Lines written and not answered yet, kept to match the answers in order. */
+  sentLines: 64,
   /** Inputs of one receiver. */
   inputs: 60,
   /** Length of a name (model, zone, input). */

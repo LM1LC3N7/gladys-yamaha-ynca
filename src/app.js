@@ -27,6 +27,7 @@ import { ReceiverLink } from './ynca/link.js';
 import {
   MUTE,
   ALL_INPUTS,
+  MAIN_ZONE_SYNC,
   POWER,
   SUBUNIT_INPUTS,
   formatDb,
@@ -41,7 +42,14 @@ import {
 const BUTTONS = new Set([FEATURES.POWER_ON, FEATURES.STANDBY, FEATURES.MUTE]);
 
 /** Commands that go before the ones waiting: quieting down never waits behind the rest. */
-const URGENT = new Set([FEATURES.STANDBY, FEATURES.MUTE]);
+const URGENT = new Set([FEATURES.MUTE]);
+
+/**
+ * Standby never waits in the queue: it is sent at once on the connection (at
+ * most one line spacing behind the line in flight), and the command running
+ * for the same zone sends nothing more after it.
+ */
+const DIRECT = new Set([FEATURES.STANDBY]);
 
 /**
  * The volume of a command, validated strictly: an integer 0..100 given as a
@@ -110,6 +118,8 @@ export class YncaApp {
     this.publishTimers = new Map();
     /** `<addressKey>|<zone>` -> { timer }: the one wake-up check chain of a zone */
     this.wakeChecks = new Map();
+    /** `<addressKey>|<zone>` -> count of the Standby presses: a command started before one stops writing. */
+    this.standbys = new Map();
     this.generation = 0;
     this.tickTimer = undefined;
     this.persistTimer = undefined;
@@ -407,7 +417,8 @@ export class YncaApp {
     const options = linkInputOptions(state);
     for (const zone of zones) {
       const input = state.zones[zone]?.input;
-      if (isInput(input) && !options.some((o) => o.value === input)) {
+      // "Main Zone Sync" is added for zones 2 to 4 by inputOptions(), never kept in the shared list.
+      if (isInput(input) && input !== MAIN_ZONE_SYNC && !options.some((o) => o.value === input)) {
         options.push({ value: input, label: input });
       }
     }
@@ -601,19 +612,31 @@ export class YncaApp {
     let late = false;
     // Set just before a command line leaves: from then on, it may have
     // reached the receiver, whatever happens next.
-    const context = { mayHaveSent: false, sent: 0 };
-    const run = this.enqueue(
-      receiverKey,
-      async () => {
-        if (late || this.remaining(started) < 50) {
-          // Gladys stopped waiting while this command was queued: dropped, never sent late.
-          late = true;
-          throw new DeviceError(ERROR_KINDS.BUDGET, 'No time left for this command, nothing sent');
-        }
-        return this.command(receiver, zone, key, checked, started, context);
-      },
-      { urgent: URGENT.has(key) },
-    );
+    const zoneKey = this.wakeKey(receiver, zone);
+    const context = {
+      mayHaveSent: false,
+      sent: 0,
+      zoneKey,
+      standby: key === FEATURES.STANDBY,
+      standbys: this.standbys.get(zoneKey) ?? 0,
+    };
+    if (DIRECT.has(key)) {
+      // Counted now: the command running for this zone writes nothing more.
+      context.standbys += 1;
+      this.standbys.set(zoneKey, context.standbys);
+      this.cancelWakeCheck(zoneKey);
+    }
+    const task = async () => {
+      if (late || this.remaining(started) < 50) {
+        // Gladys stopped waiting while this command was queued: dropped, never sent late.
+        late = true;
+        throw new DeviceError(ERROR_KINDS.BUDGET, 'No time left for this command, nothing sent');
+      }
+      return this.command(receiver, zone, key, checked, started, context);
+    };
+    const run = DIRECT.has(key)
+      ? task()
+      : this.enqueue(receiverKey, task, { urgent: URGENT.has(key) });
     // Wall-clock deadline (not the injectable timers): the ack Gladys waits for.
     let timer;
     const deadline = new Promise((resolve, reject) => {
@@ -662,6 +685,13 @@ export class YncaApp {
    * is never reported as "not sent".
    */
   async write(link, zone, fn, value, started, context, matches) {
+    if (!context.standby && (this.standbys.get(context.zoneKey) ?? 0) !== context.standbys) {
+      throw new DeviceError(
+        ERROR_KINDS.BUDGET,
+        context.sent > 0 ? `Standby pressed: ${fn} not sent` : 'Standby pressed: nothing sent',
+        { sent: context.sent > 0 },
+      );
+    }
     const budget = Math.min(this.timings.answerTimeout, this.remaining(started));
     if (budget < 50) {
       throw new DeviceError(
@@ -672,7 +702,7 @@ export class YncaApp {
     context.mayHaveSent = true;
     let answer;
     try {
-      answer = await link.write(zone, fn, value, budget);
+      answer = await link.write(zone, fn, value, budget, matches);
     } catch {
       context.mayHaveSent = context.sent > 0;
       throw new DeviceError(
@@ -692,19 +722,20 @@ export class YncaApp {
         { sent: true },
       );
     }
-    if (answer.value !== undefined) {
-      throw new DeviceError(
-        ERROR_KINDS.TIMEOUT,
-        `Sent; the receiver reports ${fn} ${short(answer.value)}`,
-        { sent: true },
-      );
-    }
-    // No answer (some receivers do not answer a value already set): read back.
+    // No accepted answer (some receivers do not answer a value already set,
+    // or a line pushed meanwhile carried another value): read back.
     const left = Math.min(this.timings.answerTimeout, this.remaining(started) - 100);
     if (!answer.closed && left >= 100) {
       const read = await link.read(zone, fn, left).catch(() => ({}));
       if (read.value !== undefined && matches(read.value)) {
         return;
+      }
+      if (read.value !== undefined) {
+        throw new DeviceError(
+          ERROR_KINDS.TIMEOUT,
+          `Sent; the receiver reports ${fn} ${short(read.value)}`,
+          { sent: true },
+        );
       }
     }
     throw new DeviceError(ERROR_KINDS.TIMEOUT, 'Sent, without confirmation from the receiver', {
@@ -752,13 +783,28 @@ export class YncaApp {
     switch (key) {
       case FEATURES.POWER_ON: {
         // A new press starts over: the check chain of the previous one stops.
-        this.cancelWakeCheck(this.wakeKey(receiver, zone));
-        await write('PWR', POWER.ON);
+        this.cancelWakeCheck(context.zoneKey);
+        try {
+          await write('PWR', POWER.ON);
+        } catch (err) {
+          // Sent but confirmed late (or not at all): the zone may be waking
+          // up, so the cap is checked in the background all the same. Only
+          // a refusal, or nothing sent, starts no check.
+          const stood = (this.standbys.get(context.zoneKey) ?? 0) !== context.standbys;
+          if (err.sent && err.kind !== ERROR_KINDS.REFUSED && !stood) {
+            this.capAfterWake(receiver, zone, 1);
+          }
+          throw err;
+        }
         // A zone wakes up at the volume it had (or its initial volume):
         // brought back to the cap, within what is left of this command first,
         // then in the background. The ack never depends on it.
-        const done = await this.capVolume(receiver, zone, link, () =>
-          Math.min(this.timings.answerTimeout, this.remaining(started) - 200),
+        const done = await this.capVolume(
+          receiver,
+          zone,
+          link,
+          () => Math.min(this.timings.answerTimeout, this.remaining(started) - 200),
+          context.standbys,
         ).catch(() => false);
         if (!done) {
           this.capAfterWake(receiver, zone, 1);
@@ -834,9 +880,15 @@ export class YncaApp {
   /**
    * Reads the volume and lowers it to the cap when the zone is on and above
    * it. True when settled (lowered, or nothing to lower), false when the
-   * zone cannot tell yet (still waking up) or the budget ran out.
+   * zone cannot tell yet (still waking up) or the budget ran out. A Standby
+   * pressed since `standbys` was counted settles it: nothing more is written.
    */
-  async capVolume(receiver, zone, link, budget) {
+  async capVolume(receiver, zone, link, budget, standbys) {
+    const key = this.wakeKey(receiver, zone);
+    const stood = () => (this.standbys.get(key) ?? 0) !== standbys;
+    if (stood()) {
+      return true;
+    }
     if (budget() < 50 || !link.connected || link.state.zones[zone]?.power !== true) {
       return false;
     }
@@ -849,15 +901,21 @@ export class YncaApp {
     if (volume <= cap) {
       return true;
     }
+    if (stood()) {
+      return true;
+    }
     if (budget() < 50) {
       return false;
     }
     this.logger.info(
       `${deviceName(receiver, zone)}: woke up at ${formatDb(volume)} dB, lowered to ${formatDb(cap)} dB`,
     );
-    const lowered = await link.write(zone, 'VOL', formatDb(cap), budget());
-    const db = parseDb(lowered.value);
-    return db !== undefined && db <= cap + 0.01;
+    const atMostCap = (v) => {
+      const db = parseDb(v);
+      return db !== undefined && db <= cap + 0.01;
+    };
+    const lowered = await link.write(zone, 'VOL', formatDb(cap), budget(), atMostCap);
+    return lowered.value !== undefined;
   }
 
   cancelWakeCheck(key) {
@@ -876,6 +934,7 @@ export class YncaApp {
   capAfterWake(receiver, zone, attempt, chain = { timer: undefined }) {
     const key = this.wakeKey(receiver, zone);
     if (attempt === 1) {
+      chain.standbys = this.standbys.get(key) ?? 0;
       this.cancelWakeCheck(key);
       this.wakeChecks.set(key, chain);
     }
@@ -895,7 +954,13 @@ export class YncaApp {
         if (!link || !current()) {
           return !current();
         }
-        return this.capVolume(receiver, zone, link, () => this.timings.answerTimeout);
+        return this.capVolume(
+          receiver,
+          zone,
+          link,
+          () => this.timings.answerTimeout,
+          chain.standbys,
+        );
       })
         .catch(() => false)
         .then((done) => {

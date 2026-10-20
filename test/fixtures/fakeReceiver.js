@@ -48,6 +48,11 @@ export async function startFakeReceiver(options = {}) {
     answerDelay: 0,
     /** Writes of these functions get no answer at all (read-back still works). */
     noAnswer: new Set(),
+    /**
+     * `hook(line, reply)`: answers a line itself when it returns true;
+     * `reply(answers, delay)` writes the answers after `delay` ms.
+     */
+    hook: undefined,
     ...options,
   };
   const { state } = cfg;
@@ -72,6 +77,15 @@ export async function startFakeReceiver(options = {}) {
         const line = buffer.slice(0, end);
         buffer = buffer.slice(end + 2);
         lines.push({ line, at: Date.now() });
+        const reply = (answers, delay = 0) => {
+          const out = answers.map((a) => `${a}\r\n`).join('');
+          const write = () => !socket.destroyed && socket.write(out);
+          delay > 0 ? setTimeout(write, delay) : write();
+        };
+        if (cfg.hook?.(line, reply)) {
+          end = buffer.indexOf('\r\n');
+          continue;
+        }
         if (!cfg.silent) {
           const answers = answer(line);
           const send = () => {
