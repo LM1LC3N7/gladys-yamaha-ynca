@@ -1,6 +1,6 @@
 {
   "name": "gladys-yamaha-ynca",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for Yamaha AV receivers over their local YNCA protocol (TCP 50000): power, volume capped by an option, mute, input and sound program of each zone. Unofficial, not affiliated with Yamaha.",
   "type": "module",

@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-21
+
 ### Added
 
 - Yamaha AV receivers over their local YNCA protocol (TCP 50000), without any
@@ -56,4 +58,5 @@ the notes of the version's GitHub Release.
   are kept; a connection flooded with lines is closed. Only fixed values or
   formatted numbers are ever sent, 100 ms apart.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-yamaha-ynca/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-yamaha-ynca/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-yamaha-ynca/releases/tag/v0.1.1
